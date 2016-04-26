@@ -1,7 +1,7 @@
 // RH_RF22.cpp
 //
 // Copyright (C) 2011 Mike McCauley
-// $Id: RH_RF22.cpp,v 1.24 2015/05/17 00:11:26 mikem Exp $
+// $Id: RH_RF22.cpp,v 1.26 2016/04/04 01:40:12 mikem Exp mikem $
 
 #include <RH_RF22.h>
 
@@ -661,6 +661,7 @@ void RH_RF22::resetRxFifo()
 {
     spiWrite(RH_RF22_REG_08_OPERATING_MODE2, RH_RF22_FFCLRRX);
     spiWrite(RH_RF22_REG_08_OPERATING_MODE2, 0);
+    _rxBufValid = false;
 }
 
 // CLear the TX FIFO

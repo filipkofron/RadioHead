@@ -1,7 +1,7 @@
 // RH_NRF905.h
 // Author: Mike McCauley (mikem@airspayce.com)
 // Copyright (C) 2014 Mike McCauley
-// $Id: RH_NRF905.h,v 1.7 2015/03/09 06:04:26 mikem Exp $
+// $Id: RH_NRF905.h,v 1.9 2016/04/04 01:40:12 mikem Exp mikem $
 //
 
 #ifndef RH_NRF905_h
@@ -150,7 +150,7 @@
 /// The examples below assume the commonly found cheap Chinese nRF905 modules. The RH_RF905 driver assumes the 
 /// the nRF905 has a 16MHz crystal.
 ///
-/// Connect the nRF905 to Teensy like this
+/// Connect the nRF905 to Teensy (or Arduino with suitable level shifters) like this
 /// \code
 ///                 CPU          nRF905 module
 ///                 3V3----------VCC   (3.3V)

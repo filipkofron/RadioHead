@@ -1,13 +1,14 @@
 // RH_ASK.cpp
 //
 // Copyright (C) 2014 Mike McCauley
-// $Id: RH_ASK.cpp,v 1.15 2015/03/09 06:04:26 mikem Exp $
+// $Id: RH_ASK.cpp,v 1.17 2016/04/04 01:40:12 mikem Exp mikem $
 
 #include <RH_ASK.h>
 #include <RHCRC.h>
 
 #if (RH_PLATFORM == RH_PLATFORM_STM32) // Maple etc
 HardwareTimer timer(MAPLE_TIMER);
+
 #endif
 
 // RH_ASK on Arduino uses Timer 1 to generate interrupts 8 times per bit interval
@@ -71,7 +72,6 @@ bool RH_ASK::init()
 
     // Ready to go
     setModeIdle();
-
     timerSetup();
 
     return true;
@@ -190,13 +190,13 @@ void RH_ASK::timerSetup()
     OCR0A = uint8_t(nticks);
 
     // Set mask to fire interrupt when OCF0A bit is set in TIFR0
-#ifdef TIMSK0
+   #ifdef TIMSK0
     // ATtiny84
     TIMSK0 |= _BV(OCIE0A);
-#else
+   #else
     // ATtiny85
     TIMSK |= _BV(OCIE0A);
-#endif
+   #endif
 
 
  #elif defined(__arm__) && defined(CORE_TEENSY)
@@ -335,10 +335,54 @@ void RH_ASK::timerSetup()
     // Start the timer counting
     timer.resume();
 
+#elif (RH_PLATFORM == RH_PLATFORM_STM32F2) // Photon
+    // Inspired by SparkIntervalTimer
+    // We use Timer 6
+    void TimerInterruptHandler(); // Forward declaration for interrupt handler
+    #define SYSCORECLOCK	60000000UL  // Timer clock tree uses core clock / 2
+    TIM_TimeBaseInitTypeDef timerInitStructure;
+    NVIC_InitTypeDef nvicStructure;
+    TIM_TypeDef* TIMx;
+    uint32_t period = (1000000 / 8) / _speed; // In microseconds
+    uint16_t prescaler = (uint16_t)(SYSCORECLOCK / 1000000UL) - 1; //To get TIM counter clock = 1MHz
+
+    attachSystemInterrupt(SysInterrupt_TIM6_Update, TimerInterruptHandler);
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM6, ENABLE);
+    nvicStructure.NVIC_IRQChannel = TIM6_DAC_IRQn;
+    TIMx = TIM6;
+    nvicStructure.NVIC_IRQChannelPreemptionPriority = 10;
+    nvicStructure.NVIC_IRQChannelSubPriority = 1;
+    nvicStructure.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_Init(&nvicStructure);
+    timerInitStructure.TIM_Prescaler = prescaler;
+    timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up;
+    timerInitStructure.TIM_Period = period;
+    timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
+    timerInitStructure.TIM_RepetitionCounter = 0;
+    
+    TIM_TimeBaseInit(TIMx, &timerInitStructure);
+    TIM_ITConfig(TIMx, TIM_IT_Update, ENABLE);
+    TIM_Cmd(TIMx, ENABLE);
+
+#elif (RH_PLATFORM == RH_PLATFORM_CHIPKIT_CORE)
+    // UsingChipKIT Core on Arduino IDE
+    uint32_t chipkit_timer_interrupt_handler(uint32_t currentTime); // Forward declaration
+    attachCoreTimerService(chipkit_timer_interrupt_handler);
+
 #elif (RH_PLATFORM == RH_PLATFORM_UNO32)
+    // Under old MPIDE, which has been discontinued:
     // ON Uno32 we use timer1
     OpenTimer1(T1_ON | T1_PS_1_1 | T1_SOURCE_INT, (F_CPU / 8) / _speed);
     ConfigIntTimer1(T1_INT_ON | T1_INT_PRIOR_1);
+
+#elif (RH_PLATFORM == RH_PLATFORM_ESP8266)
+    void esp8266_timer_interrupt_handler(); // Forward declaration
+    // The - 120 is a heuristic to correct for interrupt handling overheads
+    _timerIncrement = (clockCyclesPerMicrosecond() * 1000000 / 8 / _speed) - 120;
+    timer0_isr_init();
+    timer0_attachInterrupt(esp8266_timer_interrupt_handler);
+    timer0_write(ESP.getCycleCount() + _timerIncrement);
+//    timer0_write(ESP.getCycleCount() + 41660000);
 #endif
 
 }
@@ -472,9 +516,6 @@ bool RH_ASK::send(const uint8_t* data, uint8_t len)
     // Start the low level interrupt handler sending symbols
     setModeTx();
 
-// FIXME
-    thisASKDriver = this;
-
     return true;
 }
 
@@ -576,21 +617,49 @@ void interrupt()
     thisASKDriver->handleTimerInterrupt();
 }
 
+#elif (RH_PLATFORM == RH_PLATFORM_STM32F2) // Photon
+void TimerInterruptHandler()
+{
+    thisASKDriver->handleTimerInterrupt();
+}
+
 #elif (RH_PLATFORM == RH_PLATFORM_MSP430) 
 interrupt(TIMER0_A0_VECTOR) Timer_A_int(void) 
 {
     thisASKDriver->handleTimerInterrupt();
 };
 
+#elif (RH_PLATFORM == RH_PLATFORM_CHIPKIT_CORE)
+// Using ChipKIT Core on Arduino IDE
+uint32_t chipkit_timer_interrupt_handler(uint32_t currentTime) 
+{
+    thisASKDriver->handleTimerInterrupt();
+    return (currentTime + ((CORE_TICK_RATE * 1000)/8)/thisASKDriver->speed());
+}
+
 #elif (RH_PLATFORM == RH_PLATFORM_UNO32)
+// Under old MPIDE, which has been discontinued:
 extern "C"
 {
-void __ISR(_TIMER_1_VECTOR, ipl1) timerInterrupt(void)
-{
+ void __ISR(_TIMER_1_VECTOR, ipl1) timerInterrupt(void)
+ {
     thisASKDriver->handleTimerInterrupt();
     mT1ClearIntFlag(); // Clear timer 1 interrupt flag
 }
 }
+
+#elif (RH_PLATFORM == RH_PLATFORM_ESP8266)
+void esp8266_timer_interrupt_handler()
+{  
+//    timer0_write(ESP.getCycleCount() + 41660000);
+//    timer0_write(ESP.getCycleCount() + (clockCyclesPerMicrosecond() * 100) - 120 );
+    timer0_write(ESP.getCycleCount() + thisASKDriver->_timerIncrement);
+//    static int toggle = 0;
+//  toggle = (toggle == 1) ? 0 : 1;
+//  digitalWrite(4, toggle);
+    thisASKDriver->handleTimerInterrupt();
+}
+
 #endif
 
 // Convert a 6 bit encoded symbol into its 4 bit decoded equivalent

@@ -2,7 +2,7 @@
 // Author: Mike McCauley (mikem@airspayce.com)
 // Copyright (C) 2011 Mike McCauley
 // Contributed by Joanna Rutkowska
-// $Id: RHHardwareSPI.cpp,v 1.12 2015/07/01 00:46:05 mikem Exp $
+// $Id: RHHardwareSPI.cpp,v 1.15 2016/04/04 01:40:12 mikem Exp mikem $
 
 #include <RHHardwareSPI.h>
 
@@ -20,9 +20,9 @@ HardwareSPI SPI(1);
 #endif
 
 // Arduino Due has default SPI pins on central SPI headers, and not on 10, 11, 12, 13
-// as per otherArduinos
+// as per other Arduinos
 // http://21stdigitalhome.blogspot.com.au/2013/02/arduino-due-hardware-spi.html
-#if defined (__arm__) && !defined(CORE_TEENSY)
+#if defined (__arm__) && !defined(CORE_TEENSY) && !defined(SPI_CLOCK_DIV16)
  // Arduino Due in 1.5.5 has no definitions for SPI dividers
  // SPI clock divider is based on MCK of 84MHz  
  #define SPI_CLOCK_DIV16 (VARIANT_MCK/84000000) // 1MHz
@@ -60,7 +60,7 @@ void RHHardwareSPI::detachInterrupt()
 void RHHardwareSPI::begin() 
 {
     // Sigh: there are no common symbols for some of these SPI options across all platforms
-#if (RH_PLATFORM == RH_PLATFORM_ARDUINO) || (RH_PLATFORM == RH_PLATFORM_UNO32)
+#if (RH_PLATFORM == RH_PLATFORM_ARDUINO) || (RH_PLATFORM == RH_PLATFORM_UNO32) || (RH_PLATFORM == RH_PLATFORM_CHIPKIT_CORE)
     uint8_t dataMode;
     if (_dataMode == DataMode0)
 	dataMode = SPI_MODE0;
@@ -80,6 +80,7 @@ void RHHardwareSPI::begin()
     // Zero requires begin() before anything else :-)
     SPI.begin();
  #endif
+
     SPI.setDataMode(dataMode);
 #endif
 
@@ -95,7 +96,6 @@ void RHHardwareSPI::begin()
     else
 	bitOrder = MSBFIRST;
     SPI.setBitOrder(bitOrder);
-
     uint8_t divider;
     switch (_frequency)
     {
@@ -133,8 +133,11 @@ void RHHardwareSPI::begin()
 	    break;
 
     }
+
     SPI.setClockDivider(divider);
     SPI.begin();
+    // Teensy requires it to be set _after_ begin()
+    SPI.setClockDivider(divider);
 
 #elif (RH_PLATFORM == RH_PLATFORM_STM32) // Maple etc
     spi_mode dataMode;
@@ -228,6 +231,57 @@ void RHHardwareSPI::begin()
 
     }
     SPI.begin(frequency, bitOrder, dataMode);
+
+#elif (RH_PLATFORM == RH_PLATFORM_STM32F2) // Photon
+    Serial.println("HERE");
+    uint8_t dataMode;
+    if (_dataMode == DataMode0)
+	dataMode = SPI_MODE0;
+    else if (_dataMode == DataMode1)
+	dataMode = SPI_MODE1;
+    else if (_dataMode == DataMode2)
+	dataMode = SPI_MODE2;
+    else if (_dataMode == DataMode3)
+	dataMode = SPI_MODE3;
+    else
+	dataMode = SPI_MODE0;
+    SPI.setDataMode(dataMode);
+    if (_bitOrder == BitOrderLSBFirst)
+	SPI.setBitOrder(LSBFIRST);
+    else
+	SPI.setBitOrder(MSBFIRST);
+
+    switch (_frequency)
+    {
+	case Frequency1MHz:
+	default:
+	    SPI.setClockSpeed(1, MHZ);
+	    break;
+
+	case Frequency2MHz:
+	    SPI.setClockSpeed(2, MHZ);
+	    break;
+
+	case Frequency4MHz:
+	    SPI.setClockSpeed(4, MHZ);
+	    break;
+
+	case Frequency8MHz:
+	    SPI.setClockSpeed(8, MHZ);
+	    break;
+
+	case Frequency16MHz:
+	    SPI.setClockSpeed(16, MHZ);
+	    break;
+    }
+
+//      SPI.setClockDivider(SPI_CLOCK_DIV4);  // 72MHz / 4MHz = 18MHz
+//      SPI.setClockSpeed(1, MHZ);
+      SPI.begin();
+
+#elif (RH_PLATFORM == RH_PLATFORM_ESP8266)
+#warn "ESP8266 SPI support not yet available. Please feel free to submit a patch"
+
 #elif (RH_PLATFORM == RH_PLATFORM_RASPI) // Raspberry PI
   uint8_t dataMode;
   if (_dataMode == DataMode0)
